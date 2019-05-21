@@ -3,27 +3,35 @@
 Date created: 2019-05-08
 Version: 0.0.1
 """
-from ftplib import FTP
 from datetime import datetime as dt
 from math import pi, acos, sin, cos
+from ftplib import FTP, all_errors
+import zipfile
 
-_dt_format = '%Y%m%d'
+
 # the resolution dict should help find the resolution
 resolution = {'10 min': '10_minutes', '1 min': '1_minute', 'y': 'annual', 'd': 'daily',
-              'h': 'hourly', 'm': 'monthly', 'm_y': 'multi_annual', 's_d':'subdaily'}
+              'h': 'hourly', 'm': 'monthly', 'm_y': 'multi_annual', 's_d': 'subdaily'}
+
 
 class Location:
     """The Location object builds a list of the stations listed on the dwd server sorted by the distance
     """
-    def __init__(self, lat: float=51.0, lon: float=10):
+    def __init__(self, lat: float = 51.0, lon: float = 10.0):
         """
         :param lon: longitude (example 51.0)
         :param lat: latitude (example 10.0)
         """
         self.coordinate = [lat, lon]
+        self.server = 'opendata.dwd.de'
+        self.cdc_obDE_climate = 'climate_environment/CDC/observations_germany/climate/'
+
+    def __str__(self):
+        return 'Latitude: ' + str(self.coordinate[0]) + ', Longitude: ' + str(self.coordinate[1])
 
     def calc_distance(self, station: list) -> float:
         """Builds the distance between the given point and the station
+        :rtype: float
         :param station: coordinates of the station
         :return: the distance
         """
@@ -33,6 +41,7 @@ class Location:
         return radius * acos(sin(lat1) * sin(lat2) + cos(lat1) * cos(lat2) * cos(lon2 - lon1))
 
     def build_station_list(self, data: list) -> list:
+        _dt_format = '%Y%m%d'
         data = [' '.join(sta.split(' ')).split() for sta in data]
         del data[1]
         data[0].append('Distanz')
@@ -50,18 +59,18 @@ class Location:
 
         return data
 
-    def wind(self, reso='10_mintues'):
+    def wind(self, timestamp_start, timestamp_end, reso='10_minutes'):
         if reso in resolution:
             reso = resolution[reso]
         wind = 'wind'
-        print(reso + '/' + wind)
-        path = 'TEST_station.txt'
-        with open(path, 'r') as file:
-            data = file.readlines()
-        file.close()
-        del path, file
-        stations = self.build_station_list(data)
-        return stations
+        path = self.cdc_obDE_climate + reso + '/' + wind
+        print(path)
+        return path
+        # with open(path, 'r') as file:
+        #    data = file.readlines()
+        # file.close()
+        # stations = self.build_station_list(data)
+        # return stations
 
     def solar(self, reso='10_Minutes'):
         if reso in resolution:
@@ -75,3 +84,45 @@ class Location:
         del path, file
         stations = self.build_station_list(data)
         return stations
+
+    def ftp_login(self):
+        try:
+            ftp = FTP(self.server)
+            ftp.login()
+        except all_errors as e:
+            error_code_string = str(e).split(None, 1)[0]
+            print(error_code_string)
+        return ftp
+
+    def explore_ftp(self, c_ftp, key):
+        search_list = list()
+        for dire in c_ftp.nlst():
+            if '.' in dire:
+                pass
+            else:
+                if key in dire:
+                    print(dire)
+                    search_list.append(c_ftp.pwd())
+                    return search_list
+                if dire:
+                    c_ftp.cwd(dire)
+                    search_list.append(self.explore_ftp(c_ftp, key))
+                    print(dire)
+                    c_ftp.cwd('..')
+        return search_list
+
+
+def unzip():
+    _dt_format = '%Y%m%d%H%M'
+    ipath = '/Users/Johnny/Documents/repo/dwdopendata/10minutenwerte_ff_00003_19930428_19991231_hist.zip'
+    with zipfile.ZipFile(ipath, "r") as zip_ref:
+        with zip_ref.open(zip_ref.namelist()[0], 'r') as myfile:
+            data = myfile.readlines()
+    data = [data_point.decode().strip().split(';') for data_point in data]
+    for i in range(1, len(data)):
+        data[i][0] = data[i][0].strip()
+        data[i][1] = dt.strptime(data[i][1].strip(), _dt_format)
+        data[i][2] = float(data[i][2].strip())
+        data[i][3] = float(data[i][3].strip())
+        data[i][4] = float(data[i][4].strip())
+    return data

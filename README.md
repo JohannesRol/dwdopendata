@@ -18,7 +18,7 @@ import dwdopendata as dwd
 # set your location
 location = dwd.location(51.898, 8.9876)
 # gives back the wind speed
-wind_speed = location.wind(2019-05-01T00:00:00, 2019-05-02T00:00:00, '10min')
+wind_speed = location.wind('2019-05-01T00:00:00', '2019-05-02T00:00:00', '10min')
 ```
 
 # Support
