@@ -5,12 +5,15 @@ The package should help you to integrate the data from opendata dwd into python
 
 https://opendata.dwd.de/
 
-An alternative to this project is the dwd-weather package.
+An alternatives to this project is the dwd-weather or dwdwaether2 package.
 
 https://github.com/marians/dwd-weather
+https://github.com/hiveeyes/dwdweather2
 
-## Installation
-python3 -m pip install dwdopendata
+# Installation
+not ready yet ;) available from version 1.0
+// python3 -m pip install dwdopendata
+
 
 ## Usage
 ```
@@ -21,13 +24,13 @@ location = dwd.location(51.898, 8.9876)
 wind_speed = location.wind('2019-05-01T00:00:00', '2019-05-02T00:00:00', '10min')
 ```
 
-# Support
-stackoverflow, tag => dwdopendata 
+#Support
+issue section
 
 
 # Roadmap
 first I want to focus on ftp://ftp-cdc.dwd.de/pub/CDC/observations_germany/climate/
-* code the basic framework
+* **code the basic framework**
 * add functions
 * refactor it
 * do fancy stuff
@@ -47,8 +50,7 @@ Licensed under the MIT license. See file LICENSE for details.
 terms of use: https://www.dwd.de/copyright
 
 # Project status
-
-V00.00: there is nothing
+V00.01: there is a bit
 
 # todo
-build a coordinates function that gives back an station object
+* develop the wind method 
