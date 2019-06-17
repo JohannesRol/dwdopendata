@@ -8,7 +8,7 @@ from datetime import timedelta
 from math import pi, acos, sin, cos
 from ftplib import FTP, all_errors
 import zipfile
-import urllib.request
+import requests
 import os
 import json
 
@@ -69,12 +69,18 @@ class Location:
         radius = 6378.388  # * pi / 180  # = 111.324
         return radius * acos(sin(lat1) * sin(lat2) + cos(lat1) * cos(lat2) * cos(lon2 - lon1))
 
-    def build_station_list(self, data: list) -> list:
+    def build_station_list(self, data: str) -> list:
         _dt_format = '%Y%m%d'
+        data = data.split('\n')
         data = [' '.join(sta.split(' ')).split() for sta in data]
         del data[1]
+        del data[-1]
         data[0].append('Distanz')
+        to_delete = list()
         for i in range(1, len(data)):
+            if not data[i]:
+                to_delete.append(i)
+                continue
             if len(data[i]) != len(data[0]) - 1:
                 data[i] = data[i][0:6] + [' '.join(data[i][6:-1]), data[i][-1]]
             data[i][1] = dt.strptime(data[i][1], _dt_format)
@@ -86,9 +92,23 @@ class Location:
             data[i].append(self.calc_distance(data[i][4:6]))
         data[1:-1] = sorted(data[1:-1], key=lambda x: x[-1])
 
+        for delete in to_delete:
+            del data[delete]
+
         return data
 
     def wind(self, start, end, reso='10_minutes', where='cdc_obDE_climate'):
+        """# todo **there some desgin issues**
+
+        :param start: Start-time
+        :param end: end-time
+        :param reso: Possible values:
+        reso = {'10 min': '10_minutes', '1 min': '1_minute', 'y': 'annual',
+                'd': 'daily', 'h': 'hourly', 'm': 'monthly', 'm_y': 'multi_annual',
+                's_d': 'subdaily'}
+        :param where: advance option
+        :return:
+        """
         if reso in resolution:
             reso = resolution[reso]
         if where == 'cdc_obDE_climate':
@@ -114,14 +134,29 @@ class Location:
                     time_matrix[folder][0] = True
                 if before < end < after:
                     time_matrix[folder][1] = True
-        # todo get the station list of the affected folder
+        if 'meta_data' in time_matrix:
+            del time_matrix['meta_data']
+        if 'now' in time_matrix and 'recent' in time_matrix and 'historical' in time_matrix:
+            if time_matrix['historical'][0] and time_matrix['now'][1]:
+                time_matrix['recent'] = [True, True]
+        stations = list()
         for key in time_matrix:
             if True in time_matrix[key]:
                 ftp.cwd(key)
-                # download st
+                for description in ftp.nlst():
+                    if 'Beschreibung_Stationen.txt' in description:
+                        url = 'https://' + self.server + ftp.pwd() + '/' + description
+                        stations.append(self.build_station_list(requests.get(url).text))
+                        break
                 ftp.cwd('..')
         ftp.close()
-        return time_matrix
+        # todo which station lays in every timeframe (historical, recent, now (worst case))
+        # todo which station is the nearest station to the location
+        # todo download the data from every folder
+        # todo merge the data in order 1.) historical, 2.) recent 3.) now
+        # todo mark non consistent data with 'NaN' (like 9999 and so on)
+        # todo return the data
+        return stations, time_matrix
 
     def solar(self, reso='10_Minutes'):
         if reso in resolution:
@@ -158,7 +193,7 @@ class Location:
         self.debug_level = level
 
     def ftp_explore(self, c_ftp, key):
-        """Takes to long, abandon function
+        """**Takes to long, abandon function**
 
         :param c_ftp:
         :param key:
@@ -175,8 +210,9 @@ class Location:
                 if dire:
                     try:
                         c_ftp.cwd(dire)
-                    except:
-                        return
+                    except all_errors as fail:
+                        print(fail)
+                        return False
                     search_list.append(self.explore_ftp(c_ftp, key))
                     print(dire)
                     c_ftp.cwd('..')
@@ -196,19 +232,17 @@ class Location:
         :return: True if succeeds
         """
         try:
-            # todo download a list of strings and don't write it to a file
             url = 'https://' + self.server + '/weather/tree.html'
-            urllib.request.urlretrieve(url, 'dwd_tree.txt')  # download the tree
-            with open('dwd_tree.txt', 'r') as file:
-                tree = file.readlines()
-        # todo specify the exceptions
-        except:
+            tree = requests.get(url).text
+            tree = tree[tree.find('<body>') + 6:tree.find('/body') - 7].split('<br>')
+        except requests.RequestException as fail:
+            print(fail)
             print('Check your internet connection')
             return False
         paths = list()
         i = len(tree) - 1
         ident_start = 'href='
-        ident_end = '</a><br>'
+        ident_end = '</a>'
         while i != -1:
             deleted = False
             # delete the element when the key word is not in the string
@@ -228,9 +262,9 @@ class Location:
             # save to txt file
             with open('dwd_tree.txt', 'w') as f:
                 json.dump(paths, f)
-        # todo specify the exceptions
-        except:
-            print("Saving the output wasn't successful")
+        except IOError as fail:
+            print(fail)
+            print('Saving the dwd_tree.txt was not successful')
             return False
         return True
 
