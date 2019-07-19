@@ -11,6 +11,7 @@ import zipfile
 import requests
 import os
 import json
+import pandas as pd
 
 # the resolution dict should help find the resolution
 resolution = {'10 min': '10_minutes', '1 min': '1_minute', 'y': 'annual', 'd': 'daily',
@@ -147,16 +148,26 @@ class Location:
                     if 'Beschreibung_Stationen.txt' in description:
                         url = 'https://' + self.server + ftp.pwd() + '/' + description
                         stations.append(self.build_station_list(requests.get(url).text))
+                        indicator = url.split('/')[-2]
+                        print(indicator)
                         break
                 ftp.cwd('..')
+        frames_stations = list()
+        for station in stations:
+            frames_stations.append(pd.DataFrame(station[1:], columns=station[0]))
         ftp.close()
-        # todo which station lays in every timeframe (historical, recent, now (worst case))
-        # todo which station is the nearest station to the location
+        tmp_frame = frames_stations[0]
+        if len(frames_stations) > 1:
+            for x in range(1, len(frames_stations)):
+                tmp_frame = pd.merge(tmp_frame, frames_stations[x])
+            else:
+                frame = tmp_frame
+        nearest = frame[0]
         # todo download the data from every folder
         # todo merge the data in order 1.) historical, 2.) recent 3.) now
-        # todo mark non consistent data with 'NaN' (like 9999 and so on)
+        # todo mark non-consistent data with 'NaN' (like 9999 and so on)
         # todo return the data
-        return stations, time_matrix
+        return frame, nearest
 
     def solar(self, reso='10_Minutes'):
         if reso in resolution:
