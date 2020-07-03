@@ -32,10 +32,11 @@ resolution = {'10 min': '10_minutes', '1 min': '1_minute', 'y': 'annual', 'd': '
               'h': 'hourly', 'm': 'monthly', 'm_y': 'multi_annual', 's_d': 'subdaily'}
 reso_folder = {'recent': [500, 1], 'now': [1, 0], 'historical': [14600, 500]}  # days
 
+
 class Location:
     """The Location object builds a list of the stations listed on the dwd server sorted by the distance
     """
-    def __init__(self, lat: float = 51.0, lon: float = 10.0):
+    def __init__(self, lat: float = 51.0, lon: float = 10.0, op_path: str = None):
         """
         :param lon: longitude (example 51.0)
         :param lat: latitude (example 10.0)
@@ -44,73 +45,71 @@ class Location:
         self.server = 'opendata.dwd.de'
         self.cdc_obDE_climate = 'climate_environment/CDC/observations_germany/climate/'
         self.debug_level = 0
-        if not os.path.isfile('dwd_tree.txt'):
+        self.op_path = os.getcwd() or op_path
+        if not os.path.isfile(self.op_path + '\\dwd_tree.txt'):
             self.build_tree()
 
     def __str__(self):
+        """Returns a string in a specific format
+
+        :return: String with "Latitude: %s, Longitude: %s"
+        """
         return 'Latitude: ' + str(self.coordinate[0]) + ', Longitude: ' + str(self.coordinate[1])
 
-    def calc_distance(self, station: list) -> float:
-        """Builds the distance between the given point and the station
+    def calc_distance(self, lat_lon) -> float:
+        """Calculates the distance between the given point and the station
+
+        :param station: coordinates of the station in a list [LAT, LON]
+        :return: the distance between the two points
         :rtype: float
-        :param station: coordinates of the station
-        :return: the distance
         """
-        lat1, lon1 = [co * pi / 180 for co in self.coordinate]
-        lat2, lon2 = [co_st * pi / 180 for co_st in station]
+        lat1, lon1 = [float(co) * pi / 180 for co in self.coordinate]
+        lat2, lon2 = [float(co_st) * pi / 180 for co_st in lat_lon]
         radius = 6378.388  # * pi / 180  # = 111.324
         return radius * acos(sin(lat1) * sin(lat2) + cos(lat1) * cos(lat2) * cos(lon2 - lon1))
 
-    def build_station_list(self, data: str) -> list:
-        """
+    def station_list(self, url: str):
+        """ Builds a pandas Dataframe of the stations from the given url sorted by the distance from the coordinates
 
-        :param data:
-        :return:
+        :param url: URL to the station list
+        :type url: str
+        :return: pd.DataFrame of the station sorted by the distance from the location
+        :rtype: pd.DataFrame
         """
         _dt_format = '%Y%m%d'
-        data = data.split('\n')
-        data = [' '.join(sta.split(' ')).split() for sta in data]
-        del data[1]
-        del data[-1]
-        data[0].append('Distanz')
-        to_delete = list()
-        for i in range(1, len(data)):
-            if not data[i]:
-                to_delete.append(i)
-                continue
-            if len(data[i]) != len(data[0]) - 1:
-                data[i] = data[i][0:6] + [' '.join(data[i][6:-1]), data[i][-1]]
-            data[i][1] = dt.strptime(data[i][1], _dt_format)
-            data[i][2] = dt.strptime(data[i][2], _dt_format)
-            data[i][3] = float(data[i][3])
-            data[i][4] = float(data[i][4])
-            data[i][5] = float(data[i][5])
-            # calc the distance
-            data[i].append(self.calc_distance(data[i][4:6]))
-        data[1:-1] = sorted(data[1:-1], key=lambda x: x[-1])
+        stations = [text.split() for text in requests.get(url).text.split('\r\n')]
+        sta = list()
+        for station in stations[2:]:
+            if len(station) > 7:
+                tmp = station[:6]  # first 6 data point
+                tmp.append(' '.join(map(str, station[6:-1])))  # location
+                tmp.append(station[-1])  # german federal state
+                sta.append(tmp)
+        col_name = stations[0]
+        sta = pd.DataFrame(sta, columns=col_name)
+        sta[col_name[1]] = pd.to_datetime(sta[col_name[1]], format=_dt_format)
+        sta[col_name[2]] = pd.to_datetime(sta[col_name[2]], format=_dt_format)
+        sta['distanz'] = sta[['geoBreite', 'geoLaenge']].apply(self.calc_distance, axis=1)
+        sta = sta.sort_values(by='distanz')
+        return sta
 
-        for delete in to_delete:
-            del data[delete]
-
-        return data
-
-    @staticmethod
-    def search_folder(key: str, unique: bool = True) -> list:
+    def search_folder(self, key: str, unique: bool = True) -> list:
         """ Search the dwd_tree.txt file for a keyword
 
         :param key: key word of the folder name
         :type key: str
         :param unique: When the string should be unique
         :type unique: bool
-        :return:
+        :return: dictionary with path to the folder
         """
-        with open('dwd_tree.txt', 'r') as file:
+        dwd_tree_path = self.op_path + '\\dwd_tree.txt'
+        with open(dwd_tree_path, 'r') as file:
             paths = json.load(file)
         results = list()
         if r'/' in key or r'\\' in key:
             for path in paths:
-                    if key in path['path']:
-                        results.append(path)
+                if key in path['path']:
+                    results.append(path)
         else:
             for path in paths:
                 if unique:
@@ -164,27 +163,21 @@ class Location:
         if 'now' in time_matrix and 'recent' in time_matrix and 'historical' in time_matrix:
             if time_matrix['historical'][0] and time_matrix['now'][1]:
                 time_matrix['recent'] = [True, True]
-        stations = dict()
+        stations = list()
         for key in time_matrix:
             if True in time_matrix[key]:
                 ftp.cwd(key)
                 for description in ftp.nlst():
                     if 'Beschreibung_Stationen.txt' in description:
                         url = 'https://' + self.server + ftp.pwd() + '/' + description
-                        stations.update({key: self.build_station_list(requests.get(url).text)})
+                        stations.append(self.station_list(url).rename_axis(key, axis=1))
                         break
                 ftp.cwd('..')
 
-        frames_stations = list()
-        for key in stations:
-            # list of pd.Dataframe with the stations
-            frames_stations.append(pd.DataFrame(stations[key][1:], columns=stations[key][0]).rename_axis(key, axis=1))
-        ftp.close()
-
-        tmp_frame = frames_stations[0]
-        if len(frames_stations) > 1:
-            for x in range(1, len(frames_stations)):
-                tmp_frame = pd.merge(tmp_frame, frames_stations[x])
+        tmp_frame = stations[0]
+        if len(stations) > 1:
+            for x in range(1, len(stations)):
+                tmp_frame = pd.merge(tmp_frame, stations[x])
         else:
             frame = tmp_frame
 
@@ -195,7 +188,7 @@ class Location:
         # todo return the data
         return frame
 
-    def solar(self, reso='10_Minutes'):
+    def solar(self, reso: str = '10_Minutes'):
         if reso in resolution:
             reso = resolution[reso]
         solar = 'solar'
@@ -207,6 +200,32 @@ class Location:
         del path, file
         stations = self.build_station_list(data)
         return stations
+
+    def read_data(self, station_id: str = None, path: str = None, remove_files: bool = False):
+        """Read data from the txt file in the process directory or from the given path.
+
+        :param station_id: If station ID is given, returns only frames of the station in the process directory
+        :param path: path where the data is stored
+        :param remove_files: remove the files after extrating the data
+        :return: frames of the the data
+        """
+        process = self.op_path + '\\process\\' or path
+        time_format = '%Y%m%d%H%M'
+        time_column = 'MESS_DATUM'
+        file_names = [file for file in os.listdir(process) if '.txt' in file]
+        if station_id is not None:
+            file_names = [file for file in file_names if station_id in file]
+
+        frames = list()
+        for filename in file_names:
+            frame = pd.read_table(process + filename, sep=';')
+            frame = frame.replace(-999., pd.np.nan)
+            frame[time_column] = pd.to_datetime(frame[time_column], format=time_format)
+            frame.rename_axis(filename.split('.')[-2], axis=1)
+            frames.append(frame)
+            if remove_files:
+                os.remove(process + filename)
+        return frames
 
     def ftp_login(self):
         """Handles the login to the server.
@@ -221,7 +240,7 @@ class Location:
             error_code_string = str(e).split(None, 1)[0]
             print(error_code_string)
 
-    def ftp_set_debuglevel(self, level):
+    def ftp_set_debuglevel(self, level: int):
         """Setter for the debugging level of the ftp server
 
         :param level: Debugging level for teh ftp client
@@ -229,27 +248,42 @@ class Location:
         """
         self.debug_level = level
 
+    def ftp_grab_file(self, path: str, filename: str, new_filename: str = None) -> bool:
+        """grabs a file from the dwd server
+
+        :param path: path to the directory were the file is stored
+        :param filename: name of the file
+        :param new_filename: name of the file (and sub directory)
+        :return: True
+        """
+        ftp = self.ftp_login()
+        ftp.cwd(path)
+        new_filename = new_filename or path.split('/')[-1]
+        with open(new_filename, 'wb') as local_file:
+            ftp.retrbinary('RETR ' + filename, local_file.write, 1024)
+        ftp.quit()
+        return True
+
     def ftp_get_data(self, path: str, station_id: str):
+        """Gets the data from the dwd server and returns it as pd.DataFrame
+
+        :param path: path to the directory were the data is stored
+        :param station_id: ID of the station
+        :return: pd.DataFrame
+        """
+        process = self.op_path + '\\process\\'
+
         ftp = self.ftp_login()
         ftp.cwd(path)
         file_names = [zip_file for zip_file in ftp.nlst() if station_id in zip_file]
-        frames = list()
+        ftp.quit()
+
         for filename in file_names:
             file_type = '.' + filename.split('.')[-1]
-            new_filename = 'process/tmp_data' + file_type
-            try:
-                ftp.retrbinary("RETR " + filename, open(new_filename, 'wb').write)
-                with zipfile.ZipFile(new_filename, 'r') as zipObj:
-                    # Extract all the contents of zip file in current directory
-                    zipObj.extractall('process')
-                os.remove(new_filename)
-                frame = pd.read_table(os.getcwd() + '\\' + os.listdir()[0], sep=';')
-            except:
-                print('error')
-            frame = frame.replace(-999., 'NaN')
-            frame['MESS_DATUM'] = pd.to_datetime(frame['MESS_DATUM'], format='%Y%m%d%H%M')
-            frames.append(frame)
-        return frames
+            new_filename = process + 'tmp_data' + file_type
+            self.grab_file(path, filename, new_filename)
+            self.unzip_file(new_filename, process)
+            os.remove(new_filename)
 
     def ftp_explore(self, c_ftp, key):
         """**Takes to long, abandon function**
@@ -319,13 +353,25 @@ class Location:
         paths.reverse()
         try:
             # save to txt file
-            with open('dwd_tree.txt', 'w') as f:
+            with open(self.op_path + '\\dwd_tree.txt', 'w') as f:
                 json.dump(paths, f)
         except IOError as fail:
             print(fail)
             print('Saving the dwd_tree.txt was not successful')
             return False
         return True
+
+    @staticmethod
+    def unzip_file(in_path: str, out_dir: str = None):
+        """Unzip a file of the given in path to the given out path
+
+        :param in_path: path to the zip file
+        :param out_dir: path to the directory where the file should be unzip
+        :return: Nothing
+        """
+        with zipfile.ZipFile(in_path, 'r') as zipObj:
+            # Extract all the contents of zip file in the directory
+            zipObj.extractall(out_dir)
 
     @staticmethod
     def str_to_timestamp(start: str, end: str):
@@ -399,6 +445,7 @@ class Location:
             timestamp_end = dt.strptime(start, datetime_format)
 
         return timestamp_start, timestamp_end
+
 
 test_path = r'opendata.dwd.de/climate_environment/CDC/observations_germany/climate/10_minutes/wind/historical/'
 loca = Location(53.494361, 11.445833)
