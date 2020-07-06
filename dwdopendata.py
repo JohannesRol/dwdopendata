@@ -8,7 +8,6 @@ from datetime import timedelta
 from math import pi, acos, sin, cos
 from ftplib import FTP, all_errors
 import logging
-import zipfile
 import requests
 import os
 import json
@@ -176,18 +175,17 @@ class Location:
         folder_name = ftp.pwd() + '/'
         ftp.close()
 
+        # download data from every folder
         data = list()
         for station in stations:
-            current_folder = folder_name + station.columns.name
-            station_id = station['Stations_id'].iloc[0]
-            data.append(self.ftp_get_data(current_folder, station_id, start, end))
-            # todo download the data from every folder
+            key = station.columns.name
+            current_folder = folder_name + key
+            station_id = station['Stations_id'].iloc[0]  # todo download the data for a specific station
+            data.append(pd.concat(self.ftp_get_data(current_folder, station_id, start, end)))
 
-        # todo download the data from every folder
-        # todo download the data for a specific station
-        # todo merge the data in order 1.) historical, 2.) recent 3.) now
-        # todo mark non-consistent data with 'NaN' (like 9999 and so on)
-        # todo return the data
+        data = pd.concat(data, ignore_index=True, keys='MESS_DATUM')
+        data.set_index('MESS_DATUM', inplace=True)
+        data = data[(data.index > start) & (data.index <= end)]
         return data
 
     def solar(self, reso: str = '10_Minutes'):
@@ -203,12 +201,13 @@ class Location:
         stations = self.build_station_list(data)
         return stations
 
-    def ftp_login(self, debug_level):
+    def ftp_login(self, debug_level=None):
         """Handles the login to the server.
         :param debug_level: debug level of the ftp logging
         :return: FTP object
         """
-        self.debug_level = debug_level
+        if debug_level:
+            self.debug_level = debug_level
         try:
             ftp = FTP(self.server)
             ftp.set_debuglevel(self.debug_level)
@@ -408,3 +407,7 @@ class Location:
             timestamp_end = dt.strptime(start, datetime_format)
 
         return timestamp_start, timestamp_end
+
+
+test_path = r'opendata.dwd.de/climate_environment/CDC/observations_germany/climate/10_minutes/wind/historical/'
+loca = Location(53.494361, 11.445833)
