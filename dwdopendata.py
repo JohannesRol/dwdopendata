@@ -173,20 +173,22 @@ class Location:
                         stations.append(self.station_list(url).rename_axis(key, axis=1))
                         break
                 ftp.cwd('..')
+        folder_name = ftp.pwd() + '/'
+        ftp.close()
 
-        tmp_frame = stations[0]
-        if len(stations) > 1:
-            for x in range(1, len(stations)):
-                tmp_frame = pd.merge(tmp_frame, stations[x])
-        else:
-            frame = tmp_frame
+        data = list()
+        for station in stations:
+            current_folder = folder_name + station.columns.name
+            station_id = station['Stations_id'].iloc[0]
+            data.append(self.ftp_get_data(current_folder, station_id, start, end))
+            # todo download the data from every folder
 
         # todo download the data from every folder
         # todo download the data for a specific station
         # todo merge the data in order 1.) historical, 2.) recent 3.) now
         # todo mark non-consistent data with 'NaN' (like 9999 and so on)
         # todo return the data
-        return frame
+        return data
 
     def solar(self, reso: str = '10_Minutes'):
         if reso in resolution:
@@ -200,32 +202,6 @@ class Location:
         del path, file
         stations = self.build_station_list(data)
         return stations
-
-    def read_data(self, station_id: str = None, path: str = None, remove_files: bool = False):
-        """Read data from the txt file in the process directory or from the given path.
-
-        :param station_id: If station ID is given, returns only frames of the station in the process directory
-        :param path: path where the data is stored
-        :param remove_files: remove the files after extrating the data
-        :return: frames of the the data
-        """
-        process = self.op_path + '\\process\\' or path
-        time_format = '%Y%m%d%H%M'
-        time_column = 'MESS_DATUM'
-        file_names = [file for file in os.listdir(process) if '.txt' in file]
-        if station_id is not None:
-            file_names = [file for file in file_names if station_id in file]
-
-        frames = list()
-        for filename in file_names:
-            frame = pd.read_table(process + filename, sep=';')
-            frame = frame.replace(-999., pd.np.nan)
-            frame[time_column] = pd.to_datetime(frame[time_column], format=time_format)
-            frame.rename_axis(filename.split('.')[-2], axis=1)
-            frames.append(frame)
-            if remove_files:
-                os.remove(process + filename)
-        return frames
 
     def ftp_login(self):
         """Handles the login to the server.
@@ -264,26 +240,28 @@ class Location:
         ftp.quit()
         return True
 
-    def ftp_get_data(self, path: str, station_id: str):
+    def ftp_get_data(self, path: str, station_id: str, start: str = None, end: str = None):
         """Gets the data from the dwd server and returns it as pd.DataFrame
 
         :param path: path to the directory were the data is stored
         :param station_id: ID of the station
+        :param start: Starttime (only for historical data)
+        :param end: Endtime ( only for historical data)
         :return: pd.DataFrame
         """
-        process = self.op_path + '\\process\\'
 
         ftp = self.ftp_login()
         ftp.cwd(path)
         file_names = [zip_file for zip_file in ftp.nlst() if station_id in zip_file]
         ftp.quit()
+        if 'historical' in path:
+            if start is not None and end is not None:
+                file_names = self.filter_list_of_directory_by_time(file_names, start, end)
 
+        frames = list()
         for filename in file_names:
-            file_type = '.' + filename.split('.')[-1]
-            new_filename = process + 'tmp_data' + file_type
-            self.grab_file(path, filename, new_filename)
-            self.unzip_file(new_filename, process)
-            os.remove(new_filename)
+            frames.append(self.read_data('ftp://' + self.server + path + '/' + filename))
+        return frames
 
     def ftp_explore(self, c_ftp, key):
         """**Takes to long, abandon function**
@@ -361,6 +339,54 @@ class Location:
             return False
         return True
 
+    def filter_list_of_directory_by_time(self, metadata: list, start: str, end: str, sep: str = '_'):
+        """Filters the given list of strings by time. The 5th and 6th element must be a date string.
+
+        :param metadata: List of zip file names
+        :param start: start time of the time frame
+        :param end: end time of the time frame
+        :param sep: seperator between the words
+        :return: list with the zip file and the right time frame
+        """
+        if type(start) == type(end) and start is None:
+            return metadata
+        if isinstance(start, str) or isinstance(end, str):
+            start, end = self.str_to_timestamp(start, end)
+
+        output = list()
+        for i in range(len(metadata)):
+            meta = metadata[i].split(sep)
+            meta_start, meta_end = self.str_to_timestamp(meta[3], meta[4])
+            if start <= meta_start <= end or start <= meta_end <= end or meta_start <= end <= meta_end:
+                output.append(metadata[i])
+
+        return output if output.__len__() > 0 else metadata
+
+    @staticmethod
+    def read_data(path: str):
+        """Read data from the txt file in the process directory or from the given path.
+
+        :param station_id: If station ID is given, returns only frames of the station in the process directory
+        :param path: path where the data is stored
+        :param remove_files: remove the files after extrating the data
+        :return: frames of the the data
+        """
+        filename = path.replace('\\', '/').replace('.', '/')
+        filename = filename.split('/')[-2]
+
+        time_format = '%Y%m%d%H%M'
+        time_column = 'MESS_DATUM'
+        frame = pd.read_table(path, sep=';')
+        frame = frame.replace(-999., pd.np.nan)
+        frame[time_column] = pd.to_datetime(frame[time_column], format=time_format)
+        frame.rename_axis(filename, axis=1)
+        return frame
+
+    @staticmethod
+    def extract_zip(input_zip):
+        input_zip = zipfile.ZipFile(input_zip)
+        return {name: input_zip.read(name) for name in input_zip.namelist()}
+
     @staticmethod
     def unzip_file(in_path: str, out_dir: str = None):
         """Unzip a file of the given in path to the given out path
@@ -410,14 +436,15 @@ class Location:
         try:
             if length != len(end):
                 print('Start and end date are not in the same format')
-                raise SyntaxError
-            if ('T' not in start or 'T' not in end) and length > 10:
+                raise ValueError
+            if ('T' not in start or 'T' not in end) and length > 8:
                 print('There have to be a "T" or a space between the date and the time')
-                raise SyntaxError
-        except SyntaxError as fail:
+                raise ValueError
+        except ValueError as fail:
             print(fail)
             print('There are several formats supported, please use one of them.')
             print(dati_form)
+            raise ValueError
             return None
         try:
             if 'T' in start:
@@ -438,6 +465,7 @@ class Location:
             timestamp_end = dt.strptime(end, datetime_format)
         except KeyError:
             print("Check your timestamps. Here an Example: '2019-01/01T00', '2019/02$01T00'")
+            raise KeyError
             return None
 
         if timestamp_start > timestamp_end:
@@ -449,5 +477,6 @@ class Location:
 
 test_path = r'opendata.dwd.de/climate_environment/CDC/observations_germany/climate/10_minutes/wind/historical/'
 loca = Location(53.494361, 11.445833)
+
 #data = loca.ftp_get_data(test_path, '04625')
 #print(data)
