@@ -203,10 +203,12 @@ class Location:
         stations = self.build_station_list(data)
         return stations
 
-    def ftp_login(self):
+    def ftp_login(self, debug_level):
         """Handles the login to the server.
+        :param debug_level: debug level of the ftp logging
         :return: FTP object
         """
+        self.debug_level = debug_level
         try:
             ftp = FTP(self.server)
             ftp.set_debuglevel(self.debug_level)
@@ -215,30 +217,6 @@ class Location:
         except all_errors as e:
             error_code_string = str(e).split(None, 1)[0]
             print(error_code_string)
-
-    def ftp_set_debuglevel(self, level: int):
-        """Setter for the debugging level of the ftp server
-
-        :param level: Debugging level for teh ftp client
-        :return:
-        """
-        self.debug_level = level
-
-    def ftp_grab_file(self, path: str, filename: str, new_filename: str = None) -> bool:
-        """grabs a file from the dwd server
-
-        :param path: path to the directory were the file is stored
-        :param filename: name of the file
-        :param new_filename: name of the file (and sub directory)
-        :return: True
-        """
-        ftp = self.ftp_login()
-        ftp.cwd(path)
-        new_filename = new_filename or path.split('/')[-1]
-        with open(new_filename, 'wb') as local_file:
-            ftp.retrbinary('RETR ' + filename, local_file.write, 1024)
-        ftp.quit()
-        return True
 
     def ftp_get_data(self, path: str, station_id: str, start: str = None, end: str = None):
         """Gets the data from the dwd server and returns it as pd.DataFrame
@@ -262,32 +240,6 @@ class Location:
         for filename in file_names:
             frames.append(self.read_data('ftp://' + self.server + path + '/' + filename))
         return frames
-
-    def ftp_explore(self, c_ftp, key):
-        """**Takes to long, abandon function**
-
-        :param c_ftp:
-        :param key:
-        :return:
-        """
-        search_list = list()
-        for dire in c_ftp.nlst():
-            if '.' in dire:
-                pass
-            else:
-                if key == dire:
-                    print(dire)
-                    search_list.append(c_ftp.pwd())
-                if dire:
-                    try:
-                        c_ftp.cwd(dire)
-                    except all_errors as fail:
-                        print(fail)
-                        return False
-                    search_list.append(self.explore_ftp(c_ftp, key))
-                    print(dire)
-                    c_ftp.cwd('..')
-        return search_list if search_list else None
 
     def build_tree(self):
         """ Builds a list of dict with the path and a the name of the folder and saves it as a .txt file
@@ -383,23 +335,6 @@ class Location:
         return frame
 
     @staticmethod
-    def extract_zip(input_zip):
-        input_zip = zipfile.ZipFile(input_zip)
-        return {name: input_zip.read(name) for name in input_zip.namelist()}
-
-    @staticmethod
-    def unzip_file(in_path: str, out_dir: str = None):
-        """Unzip a file of the given in path to the given out path
-
-        :param in_path: path to the zip file
-        :param out_dir: path to the directory where the file should be unzip
-        :return: Nothing
-        """
-        with zipfile.ZipFile(in_path, 'r') as zipObj:
-            # Extract all the contents of zip file in the directory
-            zipObj.extractall(out_dir)
-
-    @staticmethod
     def str_to_timestamp(start: str, end: str):
         """Returns a datetime object
 
@@ -473,10 +408,3 @@ class Location:
             timestamp_end = dt.strptime(start, datetime_format)
 
         return timestamp_start, timestamp_end
-
-
-test_path = r'opendata.dwd.de/climate_environment/CDC/observations_germany/climate/10_minutes/wind/historical/'
-loca = Location(53.494361, 11.445833)
-
-#data = loca.ftp_get_data(test_path, '04625')
-#print(data)
