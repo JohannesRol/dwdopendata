@@ -120,14 +120,12 @@ class Location:
         return results
 
     def wind(self, start, end, reso='10_minutes', where='cdc_obDE_climate'):
-        """# todo **there some desgin issues**
+        """Downloads wind-data from the nearest station
 
         :param start: Start-time
         :param end: end-time
         :param reso: Possible values:
-        reso = {'10 min': '10_minutes', '1 min': '1_minute', 'y': 'annual',
-                'd': 'daily', 'h': 'hourly', 'm': 'monthly', 'm_y': 'multi_annual',
-                's_d': 'subdaily'}
+            reso = {'10 min': '10_minutes', 'h': 'hourly', 's_d': 'subdaily'}
         :param where: advance option
         :return:
         """
@@ -407,7 +405,3 @@ class Location:
             timestamp_end = dt.strptime(start, datetime_format)
 
         return timestamp_start, timestamp_end
-
-
-test_path = r'opendata.dwd.de/climate_environment/CDC/observations_germany/climate/10_minutes/wind/historical/'
-loca = Location(53.494361, 11.445833)

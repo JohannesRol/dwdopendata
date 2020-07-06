@@ -4,11 +4,11 @@ The package should help you to integrate the data from opendata dwd into python
 
 https://opendata.dwd.de/
 
-An alternatives to this project is the dwd-weather or dwdwaether2 package.
+An alternatives to this project is the dwd-weather or wetterdienst package.
 
 https://github.com/marians/dwd-weather
 
-https://github.com/hiveeyes/dwdweather2
+https://github.com/earthobservations/wetterdienst
 
 ###Installation
 not ready yet ;) available from version 1.0
@@ -43,7 +43,7 @@ Licensed under the MIT license. See file LICENSE for details.
 terms of use: https://www.dwd.de/copyright
 
 ###Project status
-V00.01: there is a bit
+V0.90: there is a bit
 
 ###todo
-* develop the wind method 
+* refactor the wind method
