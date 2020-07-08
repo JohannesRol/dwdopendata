@@ -7,24 +7,10 @@ from datetime import datetime as dt
 from datetime import timedelta
 from math import pi, acos, sin, cos
 from ftplib import FTP, all_errors
-import logging
 import requests
 import os
 import json
 import pandas as pd
-
-
-def __create_logger__():
-    log = logging.getLogger(__name__)
-    p_handler = logging.FileHandler(__name__ + '.txt', 'w')
-    p_format = logging.Formatter('%(asctime)s : %(levelname)s : %(name)s : %(message)s')
-    p_handler.setFormatter(p_format)
-    log.addHandler(p_handler)
-    return log
-
-
-logger = __create_logger__()
-logger.setLevel(logging.INFO)
 
 # the resolution dict should help find the resolution
 resolution = {'10 min': '10_minutes', '1 min': '1_minute', 'y': 'annual', 'd': 'daily',
@@ -49,7 +35,7 @@ class Location:
             self.build_tree()
 
     def __str__(self):
-        """Returns a string in a specific format
+        """Returns a string in a specific format.
 
         :return: String with "Latitude: %s, Longitude: %s"
         """
@@ -58,7 +44,7 @@ class Location:
     def calc_distance(self, lat_lon) -> float:
         """Calculates the distance between the given point and the station
 
-        :param station: coordinates of the station in a list [LAT, LON]
+        :param lat_lon: coordinates of the station in a list [LAT, LON]
         :return: the distance between the two points
         :rtype: float
         """
@@ -109,6 +95,8 @@ class Location:
             for path in paths:
                 if key in path['path']:
                     results.append(path)
+                if key == path['path']:
+                    return path
         else:
             for path in paths:
                 if unique:
@@ -134,15 +122,12 @@ class Location:
         if where == 'cdc_obDE_climate':
             where = self.cdc_obDE_climate
         start, end = self.str_to_timestamp(start, end)
-        wind = 'wind'
-        wind_paths = self.search_folder(wind)
-        for wind_path in wind_paths:
-            if reso in wind_path['path'] and where in wind_path['path']:
-                path = wind_path['path']
+        path = where + reso + '/wind/'
+        path = self.search_folder(path)['path']
         ftp = self.ftp_login()
         ftp.cwd(path)
 
-        # checks in which directorys the fitting data is (recent, historical, now)
+        # checks in which directory the fitting data is (recent, historical, now)
         time_matrix = dict()
         now = dt.now()
         for folder in ftp.nlst():
@@ -174,30 +159,52 @@ class Location:
         ftp.close()
 
         # download data from every folder
-        data = list()
+        time_column = 'MESS_DATUM'
+        data = dict()
         for station in stations:
             key = station.columns.name
             current_folder = folder_name + key
             station_id = station['Stations_id'].iloc[0]  # todo download the data for a specific station
-            data.append(pd.concat(self.ftp_get_data(current_folder, station_id, start, end)))
+            tmp_frame = pd.concat(self.ftp_get_data(current_folder, station_id, start, end))
+            tmp_frame.set_index(time_column, inplace=True)
+            data.update({key: tmp_frame})
 
-        data = pd.concat(data, ignore_index=True, keys='MESS_DATUM')
-        data.set_index('MESS_DATUM', inplace=True)
-        data = data[(data.index > start) & (data.index <= end)]
-        return data
+        # Concat frames in the order 1.) historical 2.) recent 3.) now
+        frame = None
+        if len(data) == 1:
+            frame = data[list(data.keys())[0]]
+        else:
+            if 'historical' in data.keys():
+                frame = data.pop('historical')
+            elif 'recent' in data.keys():
+                frame = frame.pop('recent')
+            elif 'now' in data.keys():
+                frame = data.pop('now')
+
+            if frame is not None:
+                if 'recent' in data.keys():
+                    tmp_frame = data.pop('recent')
+                    tmp_frame = tmp_frame[(tmp_frame.index < frame.last_valid_index())]
+                    frame = pd.concat([frame, tmp_frame])
+                if 'now' in data.keys():
+                    tmp_frame = data.pop('now')
+                    tmp_frame = tmp_frame[(tmp_frame.index < frame.last_valid_index())]
+                    frame = pd.concat([frame, tmp_frame])
+
+        frame = frame[(frame.index > start) & (frame.index <= end)]
+        frame = frame.loc[~frame.index.duplicated(keep='first')].sort_index()
+        frame = frame.drop('eor', axis=1)
+        if reso == '10_minutes':
+            frame = frame.asfreq('10T')
+
+        return frame
 
     def solar(self, reso: str = '10_Minutes'):
         if reso in resolution:
             reso = resolution[reso]
         solar = 'solar'
-        print(reso + '/' + solar)
-        path = 'TEST_station.txt'
-        with open(path, 'r') as file:
-            data = file.readlines()
-        file.close()
-        del path, file
-        stations = self.build_station_list(data)
-        return stations
+
+        return 1
 
     def ftp_login(self, debug_level=None):
         """Handles the login to the server.
@@ -315,9 +322,7 @@ class Location:
     def read_data(path: str):
         """Read data from the txt file in the process directory or from the given path.
 
-        :param station_id: If station ID is given, returns only frames of the station in the process directory
         :param path: path where the data is stored
-        :param remove_files: remove the files after extrating the data
         :return: frames of the the data
         """
         filename = path.replace('\\', '/').replace('.', '/')
@@ -405,3 +410,6 @@ class Location:
             timestamp_end = dt.strptime(start, datetime_format)
 
         return timestamp_start, timestamp_end
+
+loca = Location()
+loca.wind('2011-01-01T00:00', '2019-07-06T00:00')
