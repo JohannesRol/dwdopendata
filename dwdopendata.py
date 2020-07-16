@@ -5,7 +5,7 @@ Version: 0.0.1
 """
 from datetime import datetime as dt
 from datetime import timedelta
-from math import pi, acos, sin, cos
+from math import pi, acos, sin, cos, log
 from ftplib import FTP, all_errors
 import requests
 import os
@@ -33,6 +33,7 @@ class Location:
         self.op_path = os.getcwd() or op_path
         if not os.path.isfile(self.op_path + '\\dwd_tree.txt'):
             self.build_tree()
+
 
     def __str__(self):
         """Returns a string in a specific format.
@@ -107,22 +108,23 @@ class Location:
                         results.append(path)
         return results
 
-    def wind(self, start, end, reso='10_minutes', where='cdc_obDE_climate'):
+    def wind(self, start, end, reso='10_minutes', station_id = None, folder='cdc_obDE_climate'):
         """Downloads wind-data from the nearest station
 
         :param start: Start-time
         :param end: end-time
         :param reso: Possible values:
             reso = {'10 min': '10_minutes', 'h': 'hourly', 's_d': 'subdaily'}
-        :param where: advance option
+        :param station_id: ID of the station
+        :param folder: advance option
         :return:
         """
         if reso in resolution:
             reso = resolution[reso]
-        if where == 'cdc_obDE_climate':
-            where = self.cdc_obDE_climate
+        if folder == 'cdc_obDE_climate':
+            folder = self.cdc_obDE_climate
         start, end = self.str_to_timestamp(start, end)
-        path = where + reso + '/wind/'
+        path = folder + reso + '/wind/'
         path = self.search_folder(path)['path']
         ftp = self.ftp_login()
         ftp.cwd(path)
@@ -161,12 +163,19 @@ class Location:
         # download data from every folder
         time_column = 'MESS_DATUM'
         data = dict()
+
         for station in stations:
+            #print(station.head().to_string())
             key = station.columns.name
             current_folder = folder_name + key
-            station_id = station['Stations_id'].iloc[0]  # todo download the data for a specific station
+            if station[station.isin([station_id])].empty:
+                print('Station ID is not in the list, set station ID to the nearest station')
+                station_id = None
+            station_id = station_id or station['Stations_id'].iloc[0]
             tmp_frame = pd.concat(self.ftp_get_data(current_folder, station_id, start, end))
             tmp_frame.set_index(time_column, inplace=True)
+            stiation_height = station.loc[station['Stations_id'] == station_id, 'Stationshoehe'].iloc[0]
+            tmp_frame.columns.set_names('Height [m]: ' + stiation_height, inplace=True)
             data.update({key: tmp_frame})
 
         # Concat frames in the order 1.) historical 2.) recent 3.) now
@@ -191,13 +200,13 @@ class Location:
                     tmp_frame = tmp_frame[(tmp_frame.index < frame.last_valid_index())]
                     frame = pd.concat([frame, tmp_frame])
 
-        frame = frame[(frame.index > start) & (frame.index <= end)]
+        frame = frame[(frame.index >= start) & (frame.index < end)]
         frame = frame.loc[~frame.index.duplicated(keep='first')].sort_index()
         frame = frame.drop('eor', axis=1)
         if reso == '10_minutes':
             frame = frame.asfreq('10T')
 
-        return frame
+        return frame# , stations
 
     def solar(self, reso: str = '10_Minutes'):
         if reso in resolution:
@@ -318,6 +327,19 @@ class Location:
 
         return output if output.__len__() > 0 else metadata
 
+    def recalc_height(self, frame, h2: float, h1: float = None, factor: float = 0.14,
+                      method: str = 'hellmann', column: str = 'FF_10', inplace=False):
+        if not inplace:
+            frame = frame.copy()
+        h1 = h1 or float(frame.columns.name.split(' ')[-1])
+        if method.lower() == 'hellmann':
+            frame[column] = frame[column].apply(self.log_windprofil, args=(h1, h2, factor))
+        else:
+            frame[column] = frame[column].apply(self.elevation_profil_hellmann, args=(h1, h2, factor))
+        frame.columns.set_names('Height [m]: ' + str(h2), inplace=True)
+        if not inplace:
+            return frame[column]
+
     @staticmethod
     def read_data(path: str):
         """Read data from the txt file in the process directory or from the given path.
@@ -410,6 +432,42 @@ class Location:
             timestamp_end = dt.strptime(start, datetime_format)
 
         return timestamp_start, timestamp_end
+
+    @staticmethod
+    def elevation_profil_hellmann(v1, h1, h2, alpha):
+        """Extrapolation of wind speed in a different height
+
+        With the help of the power law according to Hellmann, the approximately wind speed can be determined at
+        any height based on a measured wind speed at a certain height.
+
+        **Example**
+        df.FF_10 = df.FF_10.apply(elevation_profil_hellmann, args=(10,100,0.14))
+
+        :param v1: Wind speed
+        :param h1: height of the station
+        :param h2: the new height
+        :param alpha: exponent of the heights
+        :return: extrapolation of new the wind speed
+        """
+        return v1 * (h2/h1)**alpha
+
+    @staticmethod
+    def log_windprofil(v1, h1, h2, z_0):
+        """Extrapolation of the wind speed in a different height
+
+        With the help of the logarithmic wind profil, the approximately wind speed can be determined at any height
+         based on a measured wind speed at a certain height.
+
+        **Example**
+        df.FF_10 = df.FF_10.apply(log_windprofil, args=(10,100,0.14))
+
+        :param v1: wind speed
+        :param h1: height of the station
+        :param h2: the new height
+        :param z_0: Roughness length of the enviroment
+        :return: extrapolation of the new wind speed
+        """
+        return v1 * log(h2/z_0)/log(h1/z_0)
 
 loca = Location()
 loca.wind('2011-01-01T00:00', '2019-07-06T00:00')
