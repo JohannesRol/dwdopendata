@@ -11,6 +11,7 @@ import requests
 import os
 import json
 import pandas as pd
+import numpy as np
 
 # the resolution dict should help find the resolution
 resolution = {'10 min': '10_minutes', '1 min': '1_minute', 'y': 'annual', 'd': 'daily',
@@ -33,7 +34,6 @@ class Location:
         self.op_path = os.getcwd() or op_path
         if not os.path.isfile(self.op_path + '\\dwd_tree.txt'):
             self.build_tree()
-
 
     def __str__(self):
         """Returns a string in a specific format.
@@ -108,7 +108,7 @@ class Location:
                         results.append(path)
         return results
 
-    def wind(self, start, end, reso='10_minutes', station_id = None, folder='cdc_obDE_climate'):
+    def wind(self, start, end, station_id=None, folder='cdc_obDE_climate'):
         """Downloads wind-data from the nearest station
 
         :param start: Start-time
@@ -116,37 +116,44 @@ class Location:
         :param reso: Possible values:
             reso = {'10 min': '10_minutes', 'h': 'hourly', 's_d': 'subdaily'}
         :param station_id: ID of the station
-        :param folder: advance option
+        :param folder: test / advance option
         :return:
         """
-        if reso in resolution:
-            reso = resolution[reso]
+        self.get_10_min_data(start, end, station_id, folder)
+
+    def temperatur(self, start, end, station_id=None, folder='cdc_obDE_climate'):
+        return self.get_10_min_data(start, end, 'air_temperature', station_id, folder)
+
+    def precipitation(self, start, end, station_id=None, folder='cdc_obDE_climate'):
+
+        return 'not ready jet'
+        # return self.get_10_min_data(start, end, 'precipitation', station_id, folder)
+
+    def solar(self, start, end, station_id=None, folder='cdc_obDE_climate'):
+        """Downloads wind-data from the nearest station
+
+                :param start: Start-time
+                :param end: end-time
+                :param reso: Possible values:
+                    reso = {'10 min': '10_minutes', 'h': 'hourly', 's_d': 'subdaily'}
+                :param station_id: ID of the station
+                :param folder: test / advance option
+                :return:
+                """
+        return self.get_10_min_data(start, end, 'solar', station_id, folder)
+
+    def get_10_min_data(self, start, end, typ, station_id=None, folder='cdc_obDE_climate'):
+        reso = '10_minutes'
         if folder == 'cdc_obDE_climate':
             folder = self.cdc_obDE_climate
         start, end = self.str_to_timestamp(start, end)
-        path = folder + reso + '/wind/'
+        path = folder + reso + f'/{typ}/'
         path = self.search_folder(path)['path']
         ftp = self.ftp_login()
         ftp.cwd(path)
 
-        # checks in which directory the fitting data is (recent, historical, now)
-        time_matrix = dict()
-        now = dt.now()
-        for folder in ftp.nlst():
-            time_matrix.update({folder: [False, False]})
-            if folder in reso_folder:
-                before, after = reso_folder[folder]
-                before = now - timedelta(before)
-                after = now - timedelta(after)
-                if before < start < after:
-                    time_matrix[folder][0] = True
-                if before < end < after:
-                    time_matrix[folder][1] = True
-        if 'meta_data' in time_matrix:
-            del time_matrix['meta_data']
-        if 'now' in time_matrix and 'recent' in time_matrix and 'historical' in time_matrix:
-            if time_matrix['historical'][0] and time_matrix['now'][1]:
-                time_matrix['recent'] = [True, True]
+        time_matrix = self.timematrix(ftp.nlst(), start, end)
+
         stations = list()
         for key in time_matrix:
             if True in time_matrix[key]:
@@ -165,7 +172,7 @@ class Location:
         data = dict()
 
         for station in stations:
-            #print(station.head().to_string())
+            # print(station.head().to_string())
             key = station.columns.name
             current_folder = folder_name + key
             if station[station.isin([station_id])].empty:
@@ -206,14 +213,7 @@ class Location:
         if reso == '10_minutes':
             frame = frame.asfreq('10T')
 
-        return frame# , stations
-
-    def solar(self, reso: str = '10_Minutes'):
-        if reso in resolution:
-            reso = resolution[reso]
-        solar = 'solar'
-
-        return 1
+        return {'data': frame, 'meta': stations}
 
     def ftp_login(self, debug_level=None):
         """Handles the login to the server.
@@ -310,7 +310,7 @@ class Location:
         :param metadata: List of zip file names
         :param start: start time of the time frame
         :param end: end time of the time frame
-        :param sep: seperator between the words
+        :param sep: separator between the words
         :return: list with the zip file and the right time frame
         """
         if type(start) == type(end) and start is None:
@@ -329,20 +329,43 @@ class Location:
 
     def recalc_height(self, frame, h2: float, h1: float = None, factor: float = 0.14,
                       method: str = 'hellmann', column: str = 'FF_10', inplace=False):
+
         if not inplace:
             frame = frame.copy()
         h1 = h1 or float(frame.columns.name.split(' ')[-1])
         if method.lower() == 'hellmann':
-            frame[column] = frame[column].apply(self.log_windprofil, args=(h1, h2, factor))
-        else:
             frame[column] = frame[column].apply(self.elevation_profil_hellmann, args=(h1, h2, factor))
+        else:
+            frame[column] = frame[column].apply(self.log_windprofil, args=(h1, h2, factor))
         frame.columns.set_names('Height [m]: ' + str(h2), inplace=True)
         if not inplace:
             return frame[column]
 
     @staticmethod
+    def timematrix(folder_list, start, end):
+        # checks in which directory the fitting data is (recent, historical, now)
+        time_matrix = dict()
+        now = dt.now()
+        for folder in folder_list:
+            time_matrix.update({folder: [False, False]})
+            if folder in reso_folder:
+                before, after = reso_folder[folder]
+                before = now - timedelta(before)
+                after = now - timedelta(after)
+                if before < start < after:
+                    time_matrix[folder][0] = True
+                if before < end < after:
+                    time_matrix[folder][1] = True
+        if 'meta_data' in time_matrix:
+            del time_matrix['meta_data']
+        if 'now' in time_matrix and 'recent' in time_matrix and 'historical' in time_matrix:
+            if time_matrix['historical'][0] and time_matrix['now'][1]:
+                time_matrix['recent'] = [True, True]
+        return time_matrix
+
+    @staticmethod
     def read_data(path: str):
-        """Read data from the txt file in the process directory or from the given path.
+        """Read data from a txt file in the process directory or from the given path.
 
         :param path: path where the data is stored
         :return: frames of the the data
@@ -353,7 +376,7 @@ class Location:
         time_format = '%Y%m%d%H%M'
         time_column = 'MESS_DATUM'
         frame = pd.read_table(path, sep=';')
-        frame = frame.replace(-999., pd.np.nan)
+        frame = frame.replace(-999., np.nan)
         frame[time_column] = pd.to_datetime(frame[time_column], format=time_format)
         frame.rename_axis(filename, axis=1)
         return frame
@@ -404,7 +427,7 @@ class Location:
             print('There are several formats supported, please use one of them.')
             print(dati_form)
             raise ValueError
-            return None
+
         try:
             if 'T' in start:
                 date, time = start.split('T')
@@ -425,7 +448,6 @@ class Location:
         except KeyError:
             print("Check your timestamps. Here an Example: '2019-01/01T00', '2019/02$01T00'")
             raise KeyError
-            return None
 
         if timestamp_start > timestamp_end:
             timestamp_start = timestamp_end
@@ -469,5 +491,6 @@ class Location:
         """
         return v1 * log(h2/z_0)/log(h1/z_0)
 
-loca = Location()
-loca.wind('2011-01-01T00:00', '2019-07-06T00:00')
+if __name__ =="__main__":
+    loca = Location()
+    loca.wind('2011-01-01T00:00', '2019-07-06T00:00')
