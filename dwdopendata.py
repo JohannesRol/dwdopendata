@@ -119,9 +119,9 @@ class Location:
         :param folder: test / advance option
         :return:
         """
-        self.get_10_min_data(start, end, station_id, folder)
+        return self.get_10_min_data(start, end, 'wind', station_id, folder)
 
-    def temperatur(self, start, end, station_id=None, folder='cdc_obDE_climate'):
+    def temperature(self, start, end, station_id=None, folder='cdc_obDE_climate'):
         return self.get_10_min_data(start, end, 'air_temperature', station_id, folder)
 
     def precipitation(self, start, end, station_id=None, folder='cdc_obDE_climate'):
