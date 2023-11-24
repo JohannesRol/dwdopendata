@@ -132,14 +132,14 @@ class Location:
     def solar(self, start, end, station_id=None, folder='cdc_obDE_climate'):
         """Downloads wind-data from the nearest station
 
-                :param start: Start-time
-                :param end: end-time
-                :param reso: Possible values:
-                    reso = {'10 min': '10_minutes', 'h': 'hourly', 's_d': 'subdaily'}
-                :param station_id: ID of the station
-                :param folder: test / advance option
-                :return:
-                """
+        :param start: Start-time
+        :param end: end-time
+        :param reso: Possible values:
+            reso = {'10 min': '10_minutes', 'h': 'hourly', 's_d': 'subdaily'}
+        :param station_id: ID of the station
+        :param folder: test / advance option
+        :return:
+        """
         return self.get_10_min_data(start, end, 'solar', station_id, folder)
 
     def get_10_min_data(self, start, end, typ, station_id=None, folder='cdc_obDE_climate'):
@@ -368,7 +368,7 @@ class Location:
         """Read data from a txt file in the process directory or from the given path.
 
         :param path: path where the data is stored
-        :return: frames of the the data
+        :return: frames of the data
         """
         filename = path.replace('\\', '/').replace('.', '/')
         filename = filename.split('/')[-2]
@@ -491,6 +491,30 @@ class Location:
         """
         return v1 * log(h2/z_0)/log(h1/z_0)
 
-if __name__ =="__main__":
+
+def resample_data(data, freq='60min'):
+    """ Resamples the given pd.DataFrame in data['data'] with the resample function.
+    for people how are to lazy to think each time they resample the return from the functions above
+
+    :param data: Feedback from for example Location.wind(...) or .solar()
+    :param freq: default 60 min. For more see pd.DataFrame.resample(...) function
+    """
+    id = data['data'].STATIONS_ID[0]
+    data['data'].drop([qn for qn in data['data'].columns if 'QN' in qn][0], axis=1, inplace=True)
+    data['data'] = data['data'].resample(freq, label='right').sum()
+    data['data'].STATIONS_ID = id
+    return data
+
+
+def j_cm2_to_wh_m2(data):
+    """Calculates the pd.DataFrame() from the Location.solar(...) feedback
+     from joule per qubic centimeter to watt hour per squarer meter.
+    """
+    data['data'].DS_10 = data['data'].DS_10 / .36
+    data['data'].GS_10 = data['data'].GS_10 / .36
+    return data
+
+
+if __name__ == "__main__":
     loca = Location()
     loca.wind('2011-01-01T00:00', '2019-07-06T00:00')

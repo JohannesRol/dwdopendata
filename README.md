@@ -1,40 +1,35 @@
 #DWDopendata
 ###Description
-The package should help you to integrate the data from opendata dwd into python
-
-https://opendata.dwd.de/
-
-An alternatives to this project is the dwd-weather or wetterdienst package.
-
-https://github.com/marians/dwd-weather
-
-https://github.com/earthobservations/wetterdienst
-
-###Installation
-not ready yet ;) available from version 1.0
-// python3 -m pip install dwdopendata
+Works for historical wind and solar data
 
 ###Usage
 ```
 import dwdopendata as dwd
+import date_picker as dp
 # set your location
-location = dwd.location(51.898, 8.9876)
+location = dwd.Location(48.37, 10.94)
+# timestamps from last month
+ts = dp.last_month_ts()
 # gives back the wind speed
-wind_speed = location.wind('2019-05-01T00:00:00', '2019-05-02T00:00:00', '10min')
+wind_speed = location.wind(ts.start(), ts.end())  # yaaii Wind speed data
+solar = location.solar(ts.start(), ts.end())  # yaaii solar data
+
+#  some other functions for solar
+solar = dwd.resample_data(solar,'m')
+solar = dwd.j_cm2_to_wh_m2(solar)
+
+# usage example: Nominal return (=> performance ratio) for a solar power plant
+module_area = 3731  # sqaure meters
+module_efficiency = 20.15  # %
+Nominal_return = solar['data'].GS_10 * module_area * module_efficiency / 1000
+# performance_ratio = yield / Nominal_return
 ```
 
 ###Support
 issue section
 
 ###Roadmap
-first I want to focus on ftp://ftp-cdc.dwd.de/pub/CDC/observations_germany/climate/
-* **code the basic framework**
-* add functions
-* refactor it
-* do fancy stuff
-
-###Contributing
-It's in a bloody early state. I'm grateful for any who wants to help.
+ftp://ftp-cdc.dwd.de/pub/CDC/observations_germany/climate/
 
 ###License
 Licensed under the MIT license. See file LICENSE for details.
@@ -43,7 +38,6 @@ Licensed under the MIT license. See file LICENSE for details.
 terms of use: https://www.dwd.de/copyright
 
 ###Project status
-V0.90: there is a bit
+V0.98
 
 ###todo
-* refactor the wind method
